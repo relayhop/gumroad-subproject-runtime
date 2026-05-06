@@ -1,0 +1,55 @@
+name: poll_sales
+
+on:
+  schedule:
+    - cron: '0 * * * *'   # hourly UTC
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get sales since last
+        env:
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+        run: |
+          set -e
+          mkdir -p data/sales
+          ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          last_ts=""
+          [[ -f data/sales/.last_ts ]] && last_ts=$(cat data/sales/.last_ts)
+
+          resp=$(curl -sS -H "Authorization: Bearer $GUMROAD_TOKEN" \
+            "https://api.gumroad.com/v2/sales?after=$last_ts" || echo '{"success":false}')
+
+          # Save raw response
+          fn=$(date -u '+%Y%m%d_%H%M%S').json
+          echo "$resp" > "data/sales/$fn"
+          echo "$ts" > data/sales/.last_ts
+
+          new_count=$(echo "$resp" | jq '.sales | length // 0' 2>/dev/null || echo 0)
+          echo "new_sales: $new_count"
+
+          if (( new_count > 0 )); then
+            # Append income_events.log line per sale
+            mkdir -p data/income
+            echo "$resp" | jq -r '.sales[] | [(now|tostring), "USD", (.price/100|tostring), (.price/100|tostring), "gumroad", "false"] | @tsv' >> data/income/income_events.log
+
+            # Open issue
+            body=$(echo "$resp" | jq -r '.sales[] | "- " + .product_name + " — $" + (.price/100|tostring)' | head -10)
+            gh_token="${{ secrets.GH_PAT }}"
+            curl -sS -X POST -H "Authorization: token $gh_token" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/issues" \
+              -d "$(jq -n --arg title "🔔 New Gumroad sale ($new_count)" --arg body "$body" '{title:$title, body:$body, labels:["income","gumroad"]}')"
+          fi
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "auto: poll_sales $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          git push

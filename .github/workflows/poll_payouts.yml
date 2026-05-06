@@ -1,0 +1,48 @@
+name: poll_payouts
+
+on:
+  schedule:
+    - cron: '0 1 * * *'   # daily 09:00 UTC+8 = 01:00 UTC
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get payouts
+        env:
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+        run: |
+          set -e
+          mkdir -p data/payouts
+          ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # Gumroad uses /v2/sales for transactions; payouts come via Stripe.
+          # No direct payouts endpoint, so fetch sales aggregated for the day.
+          resp=$(curl -sS -H "Authorization: Bearer $GUMROAD_TOKEN" \
+            "https://api.gumroad.com/v2/sales" || echo '{"success":false}')
+
+          fn=$(date -u '+%Y%m%d').json
+          echo "$resp" > "data/payouts/$fn"
+
+          total_cents=$(echo "$resp" | jq '[.sales[].price] | add // 0' 2>/dev/null || echo 0)
+          total_usd=$(awk "BEGIN{printf \"%.2f\", $total_cents/100}")
+
+          if (( total_cents > 0 )); then
+            gh_token="${{ secrets.GH_PAT }}"
+            body="Daily Gumroad sales total: \$${total_usd}"
+            curl -sS -X POST -H "Authorization: token $gh_token" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/issues" \
+              -d "$(jq -n --arg title "💰 Daily payout summary ($ts)" --arg body "$body" '{title:$title, body:$body, labels:["income","daily"]}')"
+          fi
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "auto: poll_payouts $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          git push

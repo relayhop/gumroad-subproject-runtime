@@ -1,0 +1,34 @@
+name: disconnect_detector
+
+on:
+  schedule:
+    - cron: '15 * * * *'   # hourly :15 UTC
+  workflow_dispatch:
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+
+      - name: Check last local commit age
+        run: |
+          set -e
+          # 找最近一條非 GH Actions 自動 commit
+          last_local=$(git log --pretty='%at|%s' -100 | grep -v '^[0-9]*|auto:' | head -1 | cut -d'|' -f1)
+          [[ -z "$last_local" ]] && last_local=$(git log -1 --pretty='%at')
+
+          now=$(date +%s)
+          age_h=$(( (now - last_local) / 3600 ))
+          echo "Last local push: ${age_h}h ago"
+
+          if (( age_h > 24 )); then
+            gh_token="${{ secrets.GH_PAT }}"
+            body="本機已 ${age_h}h 無 push 到 runtime repo;可能 Mac 斷線 / 出問題。"
+            curl -sS -X POST -H "Authorization: token $gh_token" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/issues" \
+              -d "$(jq -n --arg title "⚠️ Disconnect detected (${age_h}h)" --arg body "$body" '{title:$title, body:$body, labels:["disconnect","alert"]}')"
+          fi

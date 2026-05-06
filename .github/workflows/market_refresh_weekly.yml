@@ -1,0 +1,37 @@
+name: market_refresh_weekly
+
+on:
+  schedule:
+    - cron: '0 1 * * 0'   # 週日 09:00 UTC+8 = 01:00 UTC
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Refresh Gumroad market data
+        run: |
+          set -e
+          mkdir -p data/market
+          DATE=$(date -u '+%Y-%m-%d')
+
+          # Best sellers — fetch from Discover
+          curl -sS "https://gumroad.com/discover" -A "Mozilla/5.0 ClaudeEarnSelf-runtime" \
+            -o "data/market/discover_${DATE}.html" || true
+
+          # Categories index
+          curl -sS "https://gumroad.com/discover/categories" -A "Mozilla/5.0 ClaudeEarnSelf-runtime" \
+            -o "data/market/categories_${DATE}.html" || true
+
+          # Note: HTML scrape is fallback;若有 Firecrawl key 可改 API 抓 structured data
+          echo "refreshed: $DATE"
+
+      - name: Commit data
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "auto: market_refresh $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          git push
