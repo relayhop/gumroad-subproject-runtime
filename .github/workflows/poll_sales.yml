@@ -22,15 +22,22 @@ jobs:
           set -e
           mkdir -p data/sales
           ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          last_ts=""
-          [[ -f data/sales/.last_ts ]] && last_ts=$(cat data/sales/.last_ts)
+          # Gumroad after= 要 YYYY-MM-DD 格式
+          last_date=""
+          [[ -f data/sales/.last_date ]] && last_date=$(cat data/sales/.last_date)
 
-          resp=$(curl -sS -H "Authorization: Bearer $GUMROAD_TOKEN" \
-            "https://api.gumroad.com/v2/sales?after=$last_ts" || echo '{"success":false}')
+          if [[ -n "$last_date" ]]; then
+            url="https://api.gumroad.com/v2/sales?after=${last_date}"
+          else
+            url="https://api.gumroad.com/v2/sales"
+          fi
+          resp=$(curl -sS -H "Authorization: Bearer $GUMROAD_TOKEN" "$url" || echo '{"success":false}')
 
           # Save raw response
           fn=$(date -u '+%Y%m%d_%H%M%S').json
           echo "$resp" > "data/sales/$fn"
+          # 寫今日日期(YYYY-MM-DD)供下次 after= 用
+          date -u '+%Y-%m-%d' > data/sales/.last_date
           echo "$ts" > data/sales/.last_ts
 
           new_count=$(echo "$resp" | jq '.sales | length // 0' 2>/dev/null || echo 0)
