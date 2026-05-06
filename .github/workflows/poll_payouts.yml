@@ -1,5 +1,9 @@
 name: poll_payouts
 
+permissions:
+  contents: write
+  issues: write
+
 on:
   schedule:
     - cron: '0 1 * * *'   # daily 09:00 UTC+8 = 01:00 UTC
@@ -31,7 +35,7 @@ jobs:
           total_usd=$(awk "BEGIN{printf \"%.2f\", $total_cents/100}")
 
           if (( total_cents > 0 )); then
-            gh_token="${{ secrets.GH_PAT }}"
+            gh_token="${{ secrets.GITHUB_TOKEN }}"
             body="Daily Gumroad sales total: \$${total_usd}"
             curl -sS -X POST -H "Authorization: token $gh_token" \
               -H "Accept: application/vnd.github.v3+json" \

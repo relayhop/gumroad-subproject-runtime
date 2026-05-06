@@ -1,5 +1,9 @@
 name: disconnect_detector
 
+permissions:
+  contents: write
+  issues: write
+
 on:
   schedule:
     - cron: '15 * * * *'   # hourly :15 UTC
@@ -25,7 +29,7 @@ jobs:
           echo "Last local push: ${age_h}h ago"
 
           if (( age_h > 24 )); then
-            gh_token="${{ secrets.GH_PAT }}"
+            gh_token="${{ secrets.GITHUB_TOKEN }}"
             body="本機已 ${age_h}h 無 push 到 runtime repo;可能 Mac 斷線 / 出問題。"
             curl -sS -X POST -H "Authorization: token $gh_token" \
               -H "Accept: application/vnd.github.v3+json" \
